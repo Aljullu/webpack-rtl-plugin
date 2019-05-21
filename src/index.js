@@ -1,79 +1,117 @@
-import path from 'path'
-import {createHash} from 'crypto'
-import rtlcss from 'rtlcss'
-import {ConcatSource} from 'webpack-sources'
-import cssDiff from '@romainberger/css-diff'
-import {forEachOfLimit} from 'async'
-import cssnano from 'cssnano'
+const path = require('path')
+const { createHash } = require('crypto')
+const rtlcss = require('rtlcss')
+const { ConcatSource } = require('webpack-sources')
+const cssDiff = require('@romainberger/css-diff')
+const { forEachOfLimit } = require('async')
+const cssnano = require('cssnano')
 
-const WebpackRTLPlugin = function(options = {filename: false, suffix: false, options: {}, plugins: []}) {
-  this.options = options
-}
+const pluginName = "WebpackRTLPlugin"
 
-WebpackRTLPlugin.prototype.apply = function(compiler) {
-  compiler.plugin('emit', (compilation, callback) => {
-    forEachOfLimit(compilation.chunks, 5, (chunk, key, cb) => {
-      var rtlFiles = [],
-          cssnanoPromise = Promise.resolve()
+class WebpackRTLPlugin {
+  constructor(options) {
+    this.options = {
+      filename: false,
+      options: {},
+      plugins: [],
+      suffix: false,
+      ...options
+    }
+  }
 
-      chunk.files.forEach((asset) => {
-        if (path.extname(asset) === '.css') {
+  apply(compiler) {
+    compiler.hooks.emit.tapAsync(pluginName, (compilation, callback) => {
+      forEachOfLimit(compilation.chunks, 5, (chunk, key, cb) => {
+        const rtlFiles = []
+        let cssnanoPromise = Promise.resolve()
+
+        chunk.files.forEach(asset => {
+          const match = this.options.test ? new RegExp(this.options.test).test(asset) : true
+
+          if (path.extname(asset) !== '.css') {
+            return
+          }
+
           const baseSource = compilation.assets[asset].source()
-          let rtlSource = rtlcss.process(baseSource, this.options.options, this.options.plugins)
           let filename
+          let rtlSource
 
-          if (this.options.filename) {
-            filename = this.options.filename
+          if (match) {
+            rtlSource = rtlcss.process(baseSource, this.options.options, this.options.plugins)
 
-            if (/\[contenthash\]/.test(this.options.filename)) {
-              const hash = createHash('md5').update(rtlSource).digest('hex').substr(0, 10)
-              filename = filename.replace('[contenthash]', hash)
+            if (this.options.filename instanceof Array && this.options.filename.length === 2) {
+              filename = asset.replace(this.options.filename[0], this.options.filename[1])
             }
-          }
-          else {
-          	const suffix = this.options.suffix || '.rtl'
-          	const newFilename = `${path.basename(asset, '.css')}${suffix}`
+            else if (this.options.filename) {
+              filename = this.options.filename
 
-            filename = asset.replace(path.basename(asset, '.css'), newFilename)
-          }
+              if (/\[contenthash]/.test(this.options.filename)) {
+                const hash = createHash('md5').update(rtlSource).digest('hex').substr(0, 10)
+                filename = filename.replace('[contenthash]', hash)
+              }
+              if (/\[id]/.test(this.options.filename)) {
+                filename = filename.replace('[id]', chunk.id)
+              }
+              if (/\[name]/.test(this.options.filename)) {
+                filename = filename.replace('[name]', chunk.name)
+              }
+              if (/\[file]/.test(this.options.filename)) {
+                filename = filename.replace('[file]', asset)
+              }
+              if (/\[filebase]/.test(this.options.filename)) {
+                filename = filename.replace('[filebase]', path.basename(asset))
+              }
+              if (/\[ext]/.test(this.options.filename)) {
+                filename = filename.replace('.[ext]', path.extname(asset))
+              }
+            }
+            else {
+              const suffix = this.options.suffix || '.rtl'
+              const newFilename = `${path.basename(asset, '.css')}${suffix}`
+              filename = asset.replace(path.basename(asset, '.css'), newFilename)
+            }
 
-          if (this.options.diffOnly) {
-            rtlSource = cssDiff(baseSource, rtlSource)
+            if (this.options.diffOnly) {
+              rtlSource = cssDiff(baseSource, rtlSource)
+            }
           }
 
           if (this.options.minify !== false) {
-            let nanoOptions = {}
+            let nanoOptions = { from: undefined }
             if (typeof this.options.minify === 'object') {
               nanoOptions = this.options.minify
             }
 
             cssnanoPromise = cssnanoPromise.then(() => {
-
-              const rtlMinify = cssnano.process(rtlSource, nanoOptions).then(output => {
-                compilation.assets[filename] = new ConcatSource(output.css)
-                rtlFiles.push(filename)
-              });
-
-              const originalMinify = cssnano.process( baseSource, nanoOptions).then(output => {
+              let minify = cssnano.process( baseSource, nanoOptions).then(output => {
                 compilation.assets[asset] = new ConcatSource(output.css)
               });
 
-              return Promise.all([rtlMinify,originalMinify]);
+              if (match) {
+                const rtlMinify = cssnano.process(rtlSource, nanoOptions).then(output => {
+                  compilation.assets[filename] = new ConcatSource(output.css)
+                  rtlFiles.push(filename)
+                });
+
+                minify = Promise.all([minify, rtlMinify]);
+              }
+
+              return minify;
             })
           }
-          else {
+          else if (match) {
             compilation.assets[filename] = new ConcatSource(rtlSource)
             rtlFiles.push(filename)
           }
-        }
-      })
+        })
 
-      cssnanoPromise.then(() => {
-        chunk.files.push.apply(chunk.files, rtlFiles)
-        cb()
-      })
-    }, callback)
-  })
+        cssnanoPromise.then(() => {
+          chunk.files.push.apply(chunk.files, rtlFiles)
+          cb()
+        })
+      }, callback)
+    })
+  }
 }
 
 module.exports = WebpackRTLPlugin

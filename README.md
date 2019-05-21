@@ -1,6 +1,6 @@
 # Webpack RTL Plugin [![Build Status](https://img.shields.io/travis/romainberger/webpack-rtl-plugin/master.svg?style=flat-square)](https://travis-ci.org/romainberger/webpack-rtl-plugin) [![npm version](https://img.shields.io/npm/v/webpack-rtl-plugin.svg?style=flat-square)](https://www.npmjs.com/package/webpack-rtl-plugin) [![npm downloads](https://img.shields.io/npm/dm/webpack-rtl-plugin.svg?style=flat-square)](https://www.npmjs.com/package/webpack-rtl-plugin)
 
-Webpack plugin to use in addition to [extract-text-webpack-plugin](https://github.com/webpack/extract-text-webpack-plugin) to create a second css bundle, processed to be rtl.
+Webpack plugin to use in addition to [mini-css-extract-plugin](https://github.com/webpack-contrib/mini-css-extract-plugin) to create a second css bundle, processed to be rtl.
 
 This uses [rtlcss](https://github.com/MohammadYounes/rtlcss) under the hood, please refer to its documentation for supported properties.
 
@@ -17,7 +17,7 @@ $ npm install webpack-rtl-plugin
 Add the plugin to your webpack configuration:
 
 ```js
-import WebpackRTLPlugin from 'webpack-rtl-plugin'
+const WebpackRTLPlugin = require('webpack-rtl-plugin')
 
 module.exports = {
   entry: path.join(__dirname, 'src/index.js'),
@@ -26,15 +26,25 @@ module.exports = {
     filename: 'bundle.js',
   },
   module: {
-    loaders: [
+    rules: [
       {
         test: /\.css$/,
-        loader: ExtractTextPlugin.extract('style-loader', 'css-loader'),
+        use: [
+          MiniCssExtractPlugin.loader,
+          {
+            loader: "css-loader",
+            options: {
+              ...,
+            }
+          }
+        ]
       }
     ],
   },
   plugins: [
-    new ExtractTextPlugin('style.css'),
+    new MiniCssExtractPlugin({
+        filename: 'style.css',
+    }),
     new WebpackRTLPlugin(),
   ],
 }
@@ -55,8 +65,16 @@ new WebpackRTLPlugin({
 })
 ```
 
-* `filename` the filename of the result file. May contain `[contenthash]`. Default to `style.css`.
+* `test` a RegExp (object or string) that must match asset filename
+* `filename` the filename of the result file. May contain patterns in brackets. Default to `style.css`.
   * `[contenthash]` a hash of the content of the extracted file
+  * `[id]` the module identifier
+  * `[name]` the module name
+  * `[file]` the extracted file filename 
+  * `[filebase]` the extracted file basename
+  * `[ext]` the extracted file extension
+  * May be an array of replace function arguments like `[/(\.css)/i, '-rtl$1']`.
+    Replace applies to filename that specified in extract-text-webpack-plugin.
 * `suffix` suffix added to the original base filename before the extension, if filename isn't provided. Default to `.rtl`.
 * `options` Options given to `rtlcss`. See the [rtlcss documentation for available options](http://rtlcss.com/learn/usage-guide/options/).
 * `plugins` RTLCSS plugins given to `rtlcss`. See the [rtlcss documentation for writing plugins](http://rtlcss.com/learn/extending-rtlcss/writing-a-plugin/). Default to `[]`.
